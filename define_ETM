@@ -1,0 +1,119 @@
+import torch
+import torch.nn.functional as F
+from torch import nn, optim
+import numpy as np
+
+class EmbeddedTopicModel(nn.Module):
+    def __init__(
+        self, vocabulary, 
+        num_topics=10, 
+        hidden_layer_size=800, 
+        embedding_dim=300, 
+        pretrained_embeddings=None, 
+        train_embeddings=False, 
+        dropout_rate=0.5, 
+        batch_size=1000
+    ):
+        super(EmbeddedTopicModel, self).__init__()
+        self.vocabulary = vocabulary
+        self.vocab_size = len(vocabulary)
+        self.num_topics = num_topics
+        self.hidden_layer_size = hidden_layer_size
+        self.embedding_dim = embedding_dim
+        self.train_embeddings = train_embeddings
+        self.batch_size = batch_size
+        self.elbo_history = []
+        self.reconstruction_loss_history = []
+
+        # Initialize word embeddings
+        if train_embeddings:
+            # Trainable embedding matrix
+            self.word_embeddings = nn.Linear(embedding_dim, self.vocab_size, bias=False)
+        else:
+            # Load pre-trained embeddings
+            embedding_matrix = np.zeros((self.vocab_size, self.embedding_dim))
+            for index, word in enumerate(self.vocabulary):
+                try:
+                    embedding_matrix[index] = pretrained_embeddings[word]
+                except KeyError:
+                    embedding_matrix[index] = np.random.normal(scale=0.6, size=(self.embedding_dim,))
+            self.word_embeddings = torch.from_numpy(embedding_matrix).float()
+
+        # Transformation from embedding space to topic space
+        self.topic_transformation = nn.Linear(embedding_dim, num_topics, bias=False)
+
+        # Encoder network (q_theta)
+        self.encoder_network = nn.Sequential(
+            nn.Linear(self.vocab_size, hidden_layer_size),
+            nn.ReLU(),
+            nn.Linear(hidden_layer_size, hidden_layer_size),
+            nn.ReLU(),
+        )
+
+        self.dropout = nn.Dropout(dropout_rate)
+        self.mean_layer = nn.Linear(hidden_layer_size, num_topics, bias=True)
+        self.log_variance_layer = nn.Linear(hidden_layer_size, num_topics, bias=True)
+
+        self.optimizer = optim.Adam(self.parameters(), lr=0.005, weight_decay=1.2e-6)
+
+    def forward(self, input_data, normalized_input, topic_distribution=None):
+        """
+        Forward pass: computes total loss and reconstruction loss.
+        If topic_distribution is not provided, it is computed.
+        """
+        if topic_distribution is None:
+            topic_distribution, kl_divergence = self.get_document_topic_distribution(normalized_input)
+        else:
+            kl_divergence = None
+
+        topic_word_distribution = self.get_topic_word_distribution()
+        reconstructed_log_probs = torch.log(torch.mm(topic_distribution, topic_word_distribution) + 1e-6)
+        reconstruction_loss = -(reconstructed_log_probs * input_data).sum(1).mean()
+
+        total_loss = reconstruction_loss
+        if kl_divergence is not None:
+            total_loss += kl_divergence
+
+        return total_loss, reconstruction_loss
+
+    def get_topic_word_distribution(self):
+        """Compute the topic-word distribution (beta)."""
+        if self.train_embeddings:
+            logits = self.topic_transformation(self.word_embeddings.weight)
+        else:
+            logits = self.topic_transformation(self.word_embeddings)
+        beta = F.softmax(logits, dim=0).transpose(1, 0)
+        return beta
+
+    def get_document_topic_distribution(self, normalized_input):
+        """Infer the topic distribution (theta) for a given document."""
+        encoded_representation = self.encoder_network(normalized_input)
+        encoded_representation = self.dropout(encoded_representation)
+        mean_theta = self.mean_layer(encoded_representation)
+        log_variance_theta = self.log_variance_layer(encoded_representation)
+
+        # Compute KL divergence
+        kl_divergence = -0.5 * torch.sum(
+            1 + log_variance_theta - mean_theta.pow(2) - log_variance_theta.exp(), dim=-1
+        ).mean()
+
+        # Reparameterization trick for sampling
+        if self.training:
+            noise = torch.randn_like(mean_theta)
+            topic_distribution = noise * torch.exp(0.5 * log_variance_theta) + mean_theta
+        else:
+            topic_distribution = mean_theta
+
+        topic_distribution = F.softmax(topic_distribution, dim=-1)
+        return topic_distribution, kl_divergence
+
+    def print_top_words_per_topic(self, num_top_words=10, label="Topics"):
+        """Display the most relevant words for each topic."""
+        with torch.no_grad():
+            topic_word_distribution = self.get_topic_word_distribution()
+            topic_words = []
+            for topic_index in range(self.num_topics):
+                top_word_indices = topic_word_distribution[topic_index].numpy().argsort()[-num_top_words:][::-1]
+                words = [self.vocabulary[i] for i in top_word_indices]
+                topic_words.append(words)
+            print(f'{label}: {topic_words}')
