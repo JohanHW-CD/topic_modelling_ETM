@@ -1,0 +1,261 @@
+# data_preprocessing.py
+
+import re
+import string
+import random
+import numpy as np
+from scipy import sparse
+
+# If using local stopwords list, dont forget to load it.
+
+############################
+# Text cleaning functions
+############################
+
+def is_punctuation(token):
+    """
+    Check if the token contains any punctuation character.
+    """
+    return any(character in string.punctuation for character in token)
+
+def contains_digit(token):
+    """
+    Check if the token contains any digit.
+    """
+    return any(character.isdigit() for character in token)
+
+def tokenize_special_characters(text_documents):
+    """
+    Tokenize each text document using a regex pattern that captures
+    alphanumeric words and various punctuation/special characters separately.
+    """
+    pattern = r'''[\w']+|[.,!?;-~{}´_<=>:/@*()&'$%#"]'''
+    return [re.findall(pattern, doc) for doc in text_documents]
+
+def clean_corpus(training_text_bunch, testing_text_bunch):
+    """
+    Clean a corpus by:
+      1) Splitting text into tokens (including special characters).
+      2) Converting tokens to lowercase.
+      3) Removing tokens that are purely punctuation or contain digits.
+      4) Removing tokens with length <= 1.
+    
+    Returns a list of cleaned documents as strings.
+    """
+    training_documents = tokenize_special_characters(training_text_bunch.data)
+    testing_documents = tokenize_special_characters(testing_text_bunch.data)
+    all_documents = training_documents + testing_documents
+
+    cleaned_documents = []
+    for document in all_documents:
+        cleaned_tokens = []
+        for token in document:
+            lowercased_token = token.lower()
+            if (
+                not is_punctuation(lowercased_token)
+                and not contains_digit(lowercased_token)
+                and len(lowercased_token) > 1
+            ):
+                cleaned_tokens.append(lowercased_token)
+        cleaned_document = " ".join(cleaned_tokens)
+        cleaned_documents.append(cleaned_document)
+
+    print("finished clean_corpus")
+    return cleaned_documents
+
+############################
+# Map texts to BoW
+############################
+
+def create_bow_matrix(document_ids, num_documents, token_ids, vocabulary_size):
+    """
+    Creates a sparse bag-of-words (BoW) matrix.
+
+    Args:
+      document_ids: List of document indices for each token occurrence.
+      num_documents: Total number of documents.
+      token_ids: List of token indices (based on vocabulary) for each token occurrence.
+      vocabulary_size: Size of the vocabulary.
+
+    Returns:
+      A CSR (compressed sparse row) matrix.
+    """
+    values = [1] * len(document_ids)  # '1' for each token occurrence
+    coo = sparse.coo_matrix(
+        (values, (document_ids, token_ids)),
+        shape=(num_documents, vocabulary_size)
+    )
+    return coo.tocsr()
+
+def count_tokens(bow_matrix, num_documents):
+    """
+    Extract word indices and their corresponding counts from
+    a bag-of-words (BoW) matrix.
+
+    Args:
+      bow_matrix: A CSR BoW matrix.
+      num_documents: Number of documents in the matrix.
+
+    Returns:
+      A tuple (document_token_indices, document_token_counts),
+      where each element is a list of lists corresponding to each document.
+    """
+    document_token_indices = []
+    document_token_counts = []
+    for doc_id in range(num_documents):
+        document_token_indices.append(bow_matrix[doc_id, :].indices.tolist())
+        document_token_counts.append(bow_matrix[doc_id, :].data.tolist())
+    return document_token_indices, document_token_counts
+
+def flatten_documents(documents):
+    """
+    Flatten a list of lists of token IDs. For each document,
+    replicate the doc_id for each token.
+
+    Example:
+      documents = [[5,6], [7], [8,9,10]]
+      Result = [0, 0, 1, 2, 2, 2]
+    """
+    return [doc_id for doc_id, doc in enumerate(documents) for _ in doc]
+
+############################
+# Main data preprocessing
+############################
+
+def data_preprocessing(
+    cleaned_texts,
+    min_document_frequency,
+    max_document_frequency,
+    stop_words_list,
+    train_split_ratio=0.85
+):
+    """
+    Main pipeline for data preprocessing:
+
+    1) Vectorize the cleaned text.
+    2) Remove stopwords & short tokens (<=2 characters).
+    3) Build final vocabulary based on the training subset.
+    4) Split into train/test subsets.
+    5) Create BoW matrices for train and test.
+    6) Return vocabulary, train_dataset, and test_dataset.
+
+    Args:
+      cleaned_texts: List of strings (already cleaned).
+      min_document_frequency: Minimum document frequency for CountVectorizer.
+      max_document_frequency: Maximum document frequency for CountVectorizer.
+      stop_words_list: List of stopwords to remove.
+      train_split_ratio: Proportion of documents to include in train set.
+
+    Returns:
+      final_vocab: A list of unique words in the training subset.
+      train_dataset: A dictionary with 'tokens' and 'counts' for the training set.
+      test_dataset: A dictionary containing 'test1' and 'test2' splits,
+                    each with 'tokens' and 'counts'.
+    """
+    from sklearn.feature_extraction.text import CountVectorizer
+
+    # Vectorize text using CountVectorizer
+    vectorizer = CountVectorizer(
+        min_df=min_document_frequency,
+        max_df=max_document_frequency,
+        stop_words=stop_words_list
+    )
+    vectorized_documents = vectorizer.fit_transform(cleaned_texts)
+    vectorized_documents = vectorized_documents.sign()  # indicates presence with 1
+    extracted_stop_words = vectorizer.stop_words_
+
+    # Remove from each doc any token in extracted_stop_words or with length <= 2
+    documents_minus_stops = []
+    for document in cleaned_texts:
+        filtered_tokens = []
+        for word in document.split():
+            if word not in extracted_stop_words and len(word) > 2:
+                filtered_tokens.append(word)
+        documents_minus_stops.append(filtered_tokens)
+
+    # Compute train/test split
+    num_docs = vectorized_documents.shape[0]
+    train_set_size = int(train_split_ratio * num_docs)
+    subset_indices = random.sample(range(num_docs), train_set_size)
+    remaining_indices = [idx for idx in range(num_docs) if idx not in subset_indices]
+    test_set_size = len(remaining_indices)  # the remainder
+
+    # Build the training subset of documents
+    train_docs_subset = []
+    for index in subset_indices:
+        train_docs_subset.append(documents_minus_stops[index])
+
+    # Build the final vocabulary from the training subset only
+    unique_words = set()
+    for doc in train_docs_subset:
+        for word in doc:
+            if word in vectorizer.vocabulary_:
+                unique_words.add(word)
+
+    final_vocab = list(unique_words)
+    word_to_id = {word: i for i, word in enumerate(final_vocab)}
+
+    # Convert training and testing documents to word IDs
+    train_data_ids = [
+        [word_to_id[word] for word in documents_minus_stops[index] if word in word_to_id]
+        for index in subset_indices
+    ]
+    test_data_ids = [
+        [word_to_id[word] for word in documents_minus_stops[index] if word in word_to_id]
+        for index in remaining_indices
+    ]
+
+    # Remove empty or too-short docs (length <= 1)
+    train_data_ids = [doc for doc in train_data_ids if len(doc) > 1]
+    test_data_ids = [doc for doc in test_data_ids if len(doc) > 1]
+
+    # Split test docs into two halves: test1, test2
+    test1, test2 = [], []
+    for doc in test_data_ids:
+        pivot = len(doc) // 2
+        test1.append(doc[:pivot])
+        test2.append(doc[pivot:])
+
+    # Flatten doc IDs for creating BoW matrices
+    train_doc_ids = flatten_documents(train_data_ids)
+    test_doc_ids1 = flatten_documents(test1)
+    test_doc_ids2 = flatten_documents(test2)
+
+    # Helper to gather tokens from a list of lists
+    def get_tokens_from_documents(dset):
+        tokens = []
+        for doc in dset:
+            tokens.extend(doc)
+        return tokens
+
+    # Collect token IDs from the training/test sets
+    train_tokens = get_tokens_from_documents(train_data_ids)
+    test_tokens1 = get_tokens_from_documents(test1)
+    test_tokens2 = get_tokens_from_documents(test2)
+
+    # Build BoW matrices
+    vocab_size = len(final_vocab)
+    train_bow = create_bow_matrix(train_doc_ids, len(train_data_ids), train_tokens, vocab_size)
+    test_bow1 = create_bow_matrix(test_doc_ids1, len(test1), test_tokens1, vocab_size)
+    test_bow2 = create_bow_matrix(test_doc_ids2, len(test2), test_tokens2, vocab_size)
+
+    # Extract token indices/counts
+    train_tokens_idx, train_counts = count_tokens(train_bow, len(train_data_ids))
+    test_tokens1_idx, test_counts1 = count_tokens(test_bow1, len(test1))
+    test_tokens2_idx, test_counts2 = count_tokens(test_bow2, len(test2))
+
+    # Structure the datasets into a consistent format
+    def structure_dataset(tokens, counts):
+        return {
+            'tokens': np.array([np.array(doc) for doc in tokens], dtype=object).squeeze(),
+            'counts': np.array([np.array(cnt) for cnt in counts], dtype=object).squeeze()
+        }
+
+    train_dataset = structure_dataset(train_tokens_idx, train_counts)
+    test_dataset = {
+        'test1': structure_dataset(test_tokens1_idx, test_counts1),
+        'test2': structure_dataset(test_tokens2_idx, test_counts2),
+    }
+
+    print("preprocessing finished")
+    return final_vocab, train_dataset, test_dataset
