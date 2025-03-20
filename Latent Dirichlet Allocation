@@ -1,5 +1,6 @@
 """
 Category learning from corpora via Latent Dirichlet Allocation. 
+This file is self-contained
 """
 
 # Step 1: Load the dataset
