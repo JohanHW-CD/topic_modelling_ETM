@@ -1,3 +1,10 @@
+"""
+Trains LDA model, defines measures, plot analysing graphs.
+
+This file does what LDA_train, LDA_measures, and LDA_analysis together does when you run LDA_analysis.
+However, this file is self-contained (and hence, much longer) - Johan 
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 import re
