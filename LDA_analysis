@@ -1,0 +1,65 @@
+"""
+This script loads the saved LDA model, computes 
+coherence-normalized perplexity, and plots results
+"""
+
+import pickle
+import numpy as np
+import matplotlib.pyplot as plt
+from gensim.models import LdaModel
+from gensim.corpora import Dictionary
+from lda_measures import prepare_docs_for_coherence, calculate_topic_coherence_LDA, get_topic_diversity
+
+# Load the trained model and dictionary
+with open("lda_model.pkl", "rb") as f:
+    lda_model = pickle.load(f)
+with open("lda_dictionary.pkl", "rb") as f:
+    dictionary = pickle.load(f)
+with open("lda_corpus.pkl", "rb") as f:
+    corpus = pickle.load(f)
+
+def plot_coherence_normalized_perplexity(min_df_list, processed_docs, no_above=0.7, num_topics=20, passes=20, random_state=42):
+    """
+    Plots 'coherence-normalized perplexity' for LDA at various min_df thresholds.
+    """
+
+    vocab_sizes, perplexities, coherences, cnp_values, diversities = [], [], [], [], []
+
+    for md in min_df_list:
+        print(f"\n===== min_df = {md} =====")
+        
+        dictionary.filter_extremes(no_below=md, no_above=no_above)
+        vocab_size = len(dictionary)
+        print(f"Vocabulary size: {vocab_size}")
+
+        corpus = [dictionary.doc2bow(doc) for doc in processed_docs]
+
+        # --- Topic Perplexity ---
+        total_words = sum(count for doc in corpus for (_, count) in doc)
+        bound_val = lda_model.bound(corpus)
+        perplexity = np.exp(-bound_val / total_words)
+        docs_as_sets = prepare_docs_for_coherence(corpus, dictionary)
+        custom_coh = calculate_topic_coherence_LDA(lda_model, docs_as_sets, top_n=10)
+        cnp = (perplexity / vocab_size) / custom_coh if custom_coh > 0 else np.nan
+
+        # --- Topic Diversity ---
+        beta = lda_model.get_topics()
+        td = get_topic_diversity(beta, topk=10)
+
+        vocab_sizes.append(vocab_size)
+        perplexities.append(perplexity)
+        coherences.append(custom_coh)
+        cnp_values.append(cnp)
+        diversities.append(td)
+
+    plt.figure(figsize=(7,5))
+    plt.plot(vocab_sizes, cnp_values, marker='o', color='red', linestyle='--', label='LDA')
+    plt.xlabel("Vocabulary Size")
+    plt.ylabel("Coherence‐Normalized Perplexity")
+    plt.title("LDA: Coherence‐Normalized Perplexity vs. Vocabulary Size")
+    plt.legend()
+    plt.show()
+
+if __name__ == "__main__":
+    min_df_list = [500, 300, 100, 50, 20, 10, 5, 2]
+    plot_coherence_normalized_perplexity(min_df_list, corpus)
