@@ -1,0 +1,68 @@
+"""
+Defines functions for topic diversity and coherence for a LDA model.
+"""
+
+import numpy as np
+
+
+def get_topic_diversity(beta, topk=10):
+    """
+    Calculates topic diversity based on the fraction of unique words in the top-k words of each topic.
+    """
+    num_topics = beta.shape[0]
+    list_w = np.zeros((num_topics, topk))
+
+    for k in range(num_topics):
+        idx = beta[k, :].argsort()[-topk:][::-1]
+        list_w[k, :] = idx
+
+    n_unique = len(np.unique(list_w))
+    return n_unique / (topk * num_topics)
+
+def prepare_docs_for_coherence(bow_corpus, dictionary):
+    """
+    Converts a BoW corpus into a set of word indices for coherence calculations.
+    """
+    return [set([wid for (wid, cnt) in bow_doc]) for bow_doc in bow_corpus]
+
+def get_document_frequency(docs_as_sets, word_idx, second_word_idx=None):
+    """
+    Computes document frequency for a given word index or word-pair.
+    """
+    if second_word_idx is None:
+        return sum(word_idx in doc for doc in docs_as_sets)
+    else:
+        D_wj = sum(second_word_idx in doc for doc in docs_as_sets)
+        D_wi_wj = sum((word_idx in doc and second_word_idx in doc) for doc in docs_as_sets)
+        return D_wj, D_wi_wj
+
+def calculate_topic_coherence_LDA(lda_model, docs_as_sets, top_n=10):
+    """
+    Computes LDA topic coherence score.
+    """
+    D = len(docs_as_sets)
+    beta = lda_model.get_topics()
+    num_topics = beta.shape[0]
+
+    TC_values = []
+    total_pair_count = 0.0
+
+    for k in range(num_topics):
+        top_word_indices = beta[k].argsort()[-top_n:][::-1]
+        topic_coherence_k = 0.0
+
+        for i, w_i in enumerate(top_word_indices):
+            D_wi = get_document_frequency(docs_as_sets, w_i)
+
+            for w_j in top_word_indices[i+1:]:
+                D_wj, D_wi_wj = get_document_frequency(docs_as_sets, w_i, w_j)
+                f_wi_wj = (
+                    -1 + ((np.log(D_wi) + np.log(D_wj) - 2.0 * np.log(D)) / (np.log(D_wi_wj) - np.log(D)))
+                    if D_wi_wj > 0 and D > 0 else 0.0
+                )
+                topic_coherence_k += f_wi_wj
+                total_pair_count += 1
+
+        TC_values.append(topic_coherence_k)
+
+    return np.sum(TC_values) / total_pair_count if total_pair_count else 0.0
