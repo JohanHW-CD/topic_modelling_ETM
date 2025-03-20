@@ -1,0 +1,220 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import re
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize     # a function that does this: "Hello, world!" -> ['hello', ',', 'world', '!']
+from gensim.corpora import Dictionary
+from gensim.models import LdaModel, CoherenceModel
+
+
+# Step 1: Load the dataset
+from sklearn.datasets import fetch_20newsgroups
+newsgroups = fetch_20newsgroups(subset='all', remove=('headers', 'footers', 'quotes'))  # Strip metadata
+documents = newsgroups.data     # raw text strings
+
+
+def preprocess_text(text):
+    """
+    Clean, tokenize, remove stopwords, and lemmatize a document.
+    """
+    text = re.sub(r'[^a-zA-Z]', ' ', text)
+    words = word_tokenize(text.lower())
+    stop_words = set(stopwords.words('english'))
+    
+    return [word for word in words if word not in stop_words and len(word) > 2]
+
+
+processed_docs = [preprocess_text(doc) for doc in documents]
+
+# Create a dictionary encoded representation of the documents
+# example: [["cat", "dog"], ["dog", "mouse", "cat"]] -> {0: "cat", 1: "dog", 2: "mouse"}
+dictionary = Dictionary(processed_docs)
+dictionary.filter_extremes(no_below=15, no_above=0.5)  # Remove rare and very frequent words
+
+# Create the Bag-of-Words (BoW) corpus
+# ["cat", "dog", "cat"] -> [(0, 2), (1, 1)]. 0 is cat. 1 is dog. and so on. Same int-"identifiers" as in the dictionary.
+corpus = [dictionary.doc2bow(doc) for doc in processed_docs]
+
+def get_topic_diversity(beta, topk = 10):
+    num_topics = beta.shape[0]
+    list_w = np.zeros((num_topics, topk))
+    
+    for k in range(num_topics):
+        # Get indices of top-k words for each topic
+        idx = beta[k, :].argsort()[-topk:][::-1]
+        list_w[k, :] = idx
+    
+    # Calculate unique words across all topics and normalize by (topk * num_topics)
+    n_unique = len(np.unique(list_w))
+    TD = n_unique / (topk * num_topics)
+    
+    return TD
+
+
+def prepare_docs_for_coherence(bow_corpus, dictionary):
+    """
+    Given a BoW corpus and a gensim Dictionary, convert each doc
+    to a set of word *indices* (matching your dictionary).
+    """
+    docs_as_sets = []
+    for bow_doc in bow_corpus:  # bow_doc is like [(word_id, count), (word_id2, count2), ...]
+        # Convert the (id, count) pairs to just {id, id, ...}
+        word_ids = set([wid for (wid, cnt) in bow_doc])
+        docs_as_sets.append(word_ids)
+    return docs_as_sets
+
+
+def get_document_frequency(docs_as_sets, word_idx, second_word_idx=None):
+    """
+    - If second_word_idx is None, return #docs containing word_idx.
+    - Else return (#docs containing second_word_idx, #docs containing both word_idx and second_word_idx).
+    """
+    if second_word_idx is None:
+        return sum(word_idx in doc for doc in docs_as_sets)
+    else:
+        D_wj = sum(second_word_idx in doc for doc in docs_as_sets)
+        D_wi_wj = sum((word_idx in doc and second_word_idx in doc) for doc in docs_as_sets)
+        return (D_wj, D_wi_wj)
+
+
+def calculate_topic_coherence_LDA(lda_model, docs_as_sets, top_n=10):    
+    # 1) Number of docs
+    D = len(docs_as_sets)
+    
+    # 2) LDA's topic-word matrix
+    #    shape: (num_topics, vocab_size)
+    beta = lda_model.get_topics()
+    num_topics = beta.shape[0]
+    
+    TC_values = []
+    total_pair_count = 0.0
+    
+    for k in range(num_topics):
+        # top_n word IDs in ascending order -> last `top_n` are the highest
+        top_word_indices = beta[k].argsort()[-top_n:][::-1]
+        
+        topic_coherence_k = 0.0
+        
+        for i, w_i in enumerate(top_word_indices):
+            D_wi = get_document_frequency(docs_as_sets, w_i)
+            
+            # Pair up w_i with w_j for j > i
+            for w_j in top_word_indices[i+1:]:
+                D_wj, D_wi_wj = get_document_frequency(docs_as_sets, w_i, w_j)
+                
+                if D_wi_wj <= 0 or D <= 0:
+                    f_wi_wj = 0.0
+                else:
+                    try:
+                        f_wi_wj = -1 + (
+                            (np.log(D_wi) + np.log(D_wj) - 2.0 * np.log(D))
+                            / (np.log(D_wi_wj) - np.log(D))
+                        )
+                    except (ValueError, ZeroDivisionError):
+                        f_wi_wj = 0.0
+                
+                topic_coherence_k += f_wi_wj
+                total_pair_count += 1
+        
+        TC_values.append(topic_coherence_k)
+    
+    if total_pair_count == 0:
+        return 0.0
+
+    TC = np.sum(TC_values) / total_pair_count
+    return TC
+
+
+def plot_coherence_normalized_perplexity_lda(
+    min_df_list,
+    processed_docs,
+    no_above=0.7,
+    num_topics=20,
+    passes=20,
+    random_state=42
+):
+
+    """
+    Plots 'coherence-normalized perplexity' for LDA at various min_df thresholds.
+    This parallels your ETM function, so you can overlay LDA vs. ETM later.
+
+    Parameters
+    ----------
+    min_df_list   : list of integers (min_df thresholds).
+    processed_docs: list of tokenized, pre-processed documents 
+                    (e.g. [ ["hello","world"], ["foo","bar"] , ... ]).
+    no_above      : (float) maximum fraction of docs in which a term may appear (0.5 = 50%).
+    num_topics    : how many LDA topics to learn.
+    passes        : how many training passes over the corpus.
+    random_state  : for reproducibility.
+    """
+
+    # 1) Create lists to store all metrics for plotting
+    vocab_sizes   = []
+    perplexities  = []
+    coherences    = []
+    cnp_values    = []
+    diversities   = []
+    for md in min_df_list:
+        print(f"\n===== min_df = {md} =====")
+
+        dictionary = Dictionary(processed_docs)
+        dictionary.filter_extremes(no_below=md, no_above=no_above)
+        vocab_size = len(dictionary)
+        print(f"Vocabulary size: {vocab_size}")
+
+        corpus = [dictionary.doc2bow(doc) for doc in processed_docs]
+
+        # 2) Train LDA
+        lda_model = LdaModel(
+            corpus=corpus,
+            id2word=dictionary,
+            num_topics=num_topics,
+            passes=passes,
+            random_state=random_state
+        )
+
+        # --- Topic Perplexity ---
+        total_words = sum(count for doc in corpus for (_, count) in doc)
+        bound_val = lda_model.bound(corpus)
+        avg_neg_ll = bound_val / total_words
+        perplexity = np.exp(-avg_neg_ll)
+        docs_as_sets = prepare_docs_for_coherence(corpus, dictionary)
+        custom_coh = calculate_topic_coherence_LDA(lda_model, docs_as_sets, top_n=10)
+        if custom_coh <= 0:
+            cnp = np.nan
+        else:
+            cnp = (perplexity / vocab_size) / custom_coh
+
+
+        # --- Topic Diversity ---
+        beta = lda_model.get_topics()  # shape: (num_topics, vocab_size)
+        td   = get_topic_diversity(beta, topk=10)
+
+
+        vocab_sizes.append(vocab_size)
+        perplexities.append(perplexity)
+        coherences.append(custom_coh)
+        cnp_values.append(cnp)
+        diversities.append(td)
+
+        print("vocab size: ", vocab_size)
+        print(f"  Perplexity = {perplexity:.2f}")
+        print(f"  Coherence  = {custom_coh:.4f}")
+        print(f"  CNP        = {cnp:.4f}")
+        print(f"  Diversity  = {td:.4f}")
+
+
+    # -- Plot results --
+    plt.figure(figsize=(7,5))
+    plt.plot(vocab_sizes, cnp_values, marker='o', color='red', linestyle='--', label='LDA')
+    plt.xlabel("Vocabulary Size")
+    plt.ylabel("Coherence‐Normalized Perplexity")
+    plt.title("LDA: Coherence‐Normalized Perplexity vs. Vocabulary Size")
+    plt.legend()
+    plt.show()
+
+if __name__ == "__main__":
+    min_df_list = [500, 300, 100, 50, 20, 10, 5, 2]
+    plot_coherence_normalized_perplexity_lda(min_df_list, processed_docs)
