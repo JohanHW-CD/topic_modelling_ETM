@@ -1,118 +1,49 @@
-# topic_modelling_ETM
-This is an actually amazing implementation of Embedded Topic Modeling for category learning. Every prior attempt—from Dieng, Ruiz, and Blei included—reads like a war crime against code clarity.
+# Embedded Topic Modelling
+This is an actually amazing implementation of Embedded Topic Modeling for category learning. Every prior attempt — from Dieng, Ruiz, and Blei included — reads like a war crime against code clarity. 
 
-While prior implementations—including those by Dieng, Ruiz, and Blei—laid the theoretical groundwork, their codebases often lacked clarity and Pythonic design. This repository addresses those shortcomings with clean, accessible, and well-structured implementations.
-
-In addition to ETM, this repo also includes a Latent Dirichlet Allocation (LDA) model, as LDA is the natural predecessor to ETM. ETM improves upon LDA in nearly every respect—semantic richness, generalization, and compatibility with modern deep learning tools. A comparison and analysis are included below.
-
-LDA model: implemented by me
-ETM model: implemented by me, Antony Z., and Hassan A.
-
-
+## This repo
+This repository addresses those shortcomings with clean, accessible, and well-structured implementations. In addition to ETM, this repo also includes a Latent Dirichlet Allocation (LDA) model, as LDA is the natural predecessor to ETM. The LDA model is implemented by me, and the ETM model is implemented by implemented by me, Antony Z., and Hassan A.
 
 ## Embedded Topic Modeling (ETM) – Intuition & Math
+ETM places words and topics in the same vector space and learns their closeness while learning the words positions in the space.
 
-**Embedded Topic Modeling (ETM)** is a modern topic model that blends *word embeddings* with *probabilistic topics by placing **words and topics in the same vector space**.
+![image](https://github.com/user-attachments/assets/b8541b3c-7888-4b93-b39f-97b2f2b22517)
 
-
-### How It Works (Generative Model)
-
-Let:
-- \( V \): vocabulary size  
-- \( K \): number of topics  
-- \( d \): embedding dimension  
-- \( \rho \in \mathbb{R}^{d \times V} \): word embeddings  
-- \( \alpha \in \mathbb{R}^{K \times d} \): topic embeddings  
-- \( \theta \in \Delta^{K-1} \): topic proportions for a document (sampled from a VAE)
-
-Steps to generate a document:
-1. Encode document into latent topic vector:  
-   \[
-   \theta \sim \text{VAE encoder}(x)
-   \]
-2. Compute topic mixture vector:
-   \[
-   z = \alpha^\top \theta \in \mathbb{R}^d
-   \]
-3. Probability of word \( w \):
-   \[
-   p(w \mid \theta) = \frac{\exp(\rho_w^\top z)}{\sum_{v=1}^V \exp(\rho_v^\top z)} = \text{softmax}(\rho^\top z)
-   \]
-
-So: **Words are more likely if they're close (in embedding space) to the topic mixture.**
-
-### How It Infers
-Unlike LDA, which uses Dirichlet priors, ETM uses a **Variational Autoencoder (VAE)** framework to learn:
-
-- **\( \theta \)**: inferred via a neural encoder (e.g., MLP)  
-- **\( \rho \)** and **\( \alpha \)**: learned through gradient descent
-
-The model optimizes the **Evidence Lower Bound (ELBO)**:
-\[
-\text{ELBO} = \mathbb{E}_{q(\theta \mid x)} [ \log p(x \mid \theta) ] - \text{KL}(q(\theta \mid x) \parallel p(\theta))
-\]
-If done well, this balances:
-- **Reconstruction**: matching predicted words to actual ones  
-- **Regularization**: keeping inferred topic proportions close to the prior
-
----
-
-### Why ETM?
-
-- Learns *semantic* topics using embeddings  
-- Generalizes better to rare or unseen words  
-- Fully differentiable and compatible with modern DL tools  
-- Builds a bridge between probabilistic modeling and representation learning
+The whole point of ETM is that it does not deteriorate faster than the increase of the size of the dataset, which LDA very much does.
 
 ## Latent Dirichlet Allocation (LDA) – Intuition & Math
+LDA assumes that each document is a mix of topics, and each topic is a mix of words. Then it learns topics as distributions over words, document-topic mixtures to track them, and using these assigns topics to words. For topics Z and [0, ... , N] documents, LDA simply is:
 
-Absolutely—let’s improve the LDA section to better explain **how it learns**: what’s observed, what’s latent, and how the model infers topics from raw text. Here’s the updated and more intuitive version, still Markdown-ready for a GitHub README:
+![image](https://github.com/user-attachments/assets/ea106dbe-7393-4ad0-bf97-7fe365831a14)
 
----
+## Performance measures
+Used the same as Dieng et al. Perplexity, coherency,  coherency-normalized perplexity, topic diversity and interpretablity, predictive power as defined in their paper. Formulas clearly written in code. If you are new to the topic, paste them into an ai and ask to get them intuitively explained or transcribed into math notation.
 
-## Latent Dirichlet Allocation (LDA) – Intuition & Math
+## Results (generated from repo)
+### Example topics from ETM model
 
-**Latent Dirichlet Allocation (LDA)** is a classic probabilistic model that discovers hidden topics in documents. It assumes:
+![image](https://github.com/user-attachments/assets/4d2f96df-5e3d-42be-8ca2-2cce5879ee6a)
 
-- Topics are distributions over words (e.g., “astronomy” → *planet*, *orbit*, *NASA*)  
-- Documents are mixtures of those topics (e.g., 70% astronomy, 30% technology)  
-- Words in a document are generated by first picking a topic, then picking a word from that topic
+### Example topics from LDA model
 
-### As a Generative Model:
+![image](https://github.com/user-attachments/assets/adf4fbf8-ecde-4a39-b6d3-49639b88880d)
 
-For each document \( d \), LDA assumes the following process:
+### Coherence normalized perplexity versus vocabulary size
+![image](https://github.com/user-attachments/assets/b1f4db21-b60a-4ca3-b388-a43708d0e605)
 
-1. Sample document's topic distribution:  
-   \[
-   \theta_d \sim \text{Dirichlet}(\alpha)
-   \]
-2. For each word position \( n \) in the document:
-   - Sample a topic:  
-     \[
-     z_{dn} \sim \text{Categorical}(\theta_d)
-     \]
-   - Sample a word from that topic:  
-     \[
-     w_{dn} \sim \text{Categorical}(\phi_{z_{dn}})
-     \]
-Here:
-- \( \phi_k \sim \text{Dirichlet}(\beta) \): each topic's word distribution  
-- Only \( w_{dn} \) (words) are observed  
-- \( z_{dn} \), \( \theta_d \), and \( \phi_k \) are latent and must be inferred
+### Simple measures on ETM
+![image](https://github.com/user-attachments/assets/6b9caba4-533e-44b4-a465-50054c31acd6)
 
-
-### 🔄 How It Infers
-
-Exact inference is intractable, we use **approximate inference** like. My version uses variational inference. These methods iteratively update guesses for the topic distributions until they match the observed word patterns well.
-
-LDA learns:
-- **Topics**: \( \phi_k \), distributions over words  
-- **Document-topic mixtures**: \( \theta_d \)  
-- **Topic assignments per word**: \( z_{dn} \)
-
-### Alternatives
-See below and decide depending on what aspect of category learnings you want to get right.
+## Alternatives
+See this link and decide depending on what aspect of category learnings you want to optimize for.
 https://paperswithcode.com/dataset/20-newsgroups
+
+## Dataset
+Twenty Newgroups Dataset from T. Mitchell et al.
+
+## Amazing inventors of ETM.
+[Topic Modeling in Embedding Spaces](https://aclanthology.org/2020.tacl-1.29/) (Dieng et al., TACL 2020)
+
 
 
 ### Alternatives
