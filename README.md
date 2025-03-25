@@ -44,6 +44,6 @@ LDA assumes that each document is a mix of topics, and each topic is a mix of wo
 ![image](https://github.com/user-attachments/assets/ea106dbe-7393-4ad0-bf97-7fe365831a14)
 
 ## Performance measures
-Used the same as Dieng et al. Perplexity, coherency,  coherency-normalized perplexity, topic diversity and interpretablity, predictive power as defined in their paper. Formulas clearly written in code. If you are new to the topic, paste them into an ai and ask to get them intuitively explained or transcribed into math notation.
+Used the same as Dieng et al. Perplexity, coherency,  coherency-normalized perplexity, topic diversity and interpretablity, predictive power as defined in their paper. Formulas clearly written in code. If you are new to this ML topic, paste them into an ai and ask to get them intuitively explained or transcribed into math notation, they are quite standard once you've seen them once or twice :) 
 
 
