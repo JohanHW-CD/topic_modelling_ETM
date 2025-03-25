@@ -1,5 +1,5 @@
 # Embedded Topic Modelling
-This is an actually amazing implementation of Embedded Topic Modeling for category learning. Every prior attempt — from Dieng, Ruiz, and Blei included — reads like a war crime against code clarity. 
+This is an actually amazing implementation of Embedded Topic Modeling for category learning. Every prior attempt reads like war crimes against code clarity. 
 
 ## This repo
 This repository addresses those shortcomings with clean, accessible, and well-structured implementations. In addition to ETM, this repo also includes a Latent Dirichlet Allocation (LDA) model, as LDA is the natural predecessor to ETM. The LDA model is implemented by me, and the ETM model is implemented by implemented by me, Antony Z., and Hassan A.
