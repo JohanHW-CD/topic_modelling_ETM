@@ -31,14 +31,16 @@ Twenty Newgroups Dataset from T. Mitchell et al.
 
 
 
-# Embedded Topic Modeling (ETM) – Intuituion
+
+
+## Embedded Topic Modeling (ETM) Math
 ETM places words and topics in the same vector space and learns their closeness while learning the words positions in the space.
 
 ![image](https://github.com/user-attachments/assets/b8541b3c-7888-4b93-b39f-97b2f2b22517)
 
 The whole point of ETM is that it does not deteriorate faster than the increase of the size of the dataset, which LDA very much does.
 
-# Latent Dirichlet Allocation (LDA) – Intuition 
+## Latent Dirichlet Allocation (LDA) Math 
 LDA assumes that each document is a mix of topics, and each topic is a mix of words. Then it learns topics as distributions over words, document-topic mixtures to track them, and using these assigns topics to words. For topics Z and [0, ... , N] documents, LDA simply is:
 
 ![image](https://github.com/user-attachments/assets/ea106dbe-7393-4ad0-bf97-7fe365831a14)
